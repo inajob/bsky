@@ -1,4 +1,4 @@
-module github.com/mattn/bsky
+module github.com/inajob/bsky
 
 go 1.20
 
