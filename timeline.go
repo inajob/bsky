@@ -307,6 +307,17 @@ func doPost(cCtx *cli.Context) error {
 		}
 	}
 
+	// link
+	linkTo := cCtx.String("l")
+	if linkTo != "" {
+		if post.Embed == nil {
+			post.Embed = &bsky.FeedPost_Embed{}
+		}
+		if post.Embed.EmbedExternal == nil {
+			addLink(xrpcc, post, linkTo)
+		}
+	}
+
 	for _, entry := range extractLinks(text) {
 		post.Entities = append(post.Entities, &bsky.FeedPost_Entity{
 			Index: &bsky.FeedPost_TextSlice{
