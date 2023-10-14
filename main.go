@@ -111,6 +111,7 @@ func main() {
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "r"},
 					&cli.StringFlag{Name: "q"},
+					&cli.StringFlag{Name: "l"},
 					&cli.BoolFlag{Name: "stdin"},
 					&cli.StringSliceFlag{Name: "image", Aliases: []string{"i"}},
 					&cli.StringSliceFlag{Name: "image-alt", Aliases: []string{"ia"}},
