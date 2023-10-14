@@ -30,6 +30,7 @@ import (
 	cid "github.com/ipfs/go-cid"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/disintegration/imaging"
 	"github.com/gorilla/websocket"
 	"github.com/urfave/cli/v2"
 )
@@ -222,11 +223,27 @@ func addLink(xrpcc *xrpc.Client, post *bsky.FeedPost, link string) {
 			defer resp.Body.Close()
 			b, err := ioutil.ReadAll(resp.Body)
 			if err == nil {
-				resp, err := comatproto.RepoUploadBlob(context.TODO(), xrpcc, bytes.NewReader(b))
+				img, err := imaging.Decode(bytes.NewReader(b))
+				if err != nil {
+					log.Fatal(err)
+				}
+				targetWidth := 300
+				aspectRatio := float64(img.Bounds().Dy()) / float64(img.Bounds().Dx())
+				targetHeight := int(float64(targetWidth) * aspectRatio)
+				resizedImg := imaging.Resize(img, targetWidth, targetHeight, imaging.Lanczos)
+				var resizedImageBytes []byte
+				buf := new(bytes.Buffer)
+				err = imaging.Encode(buf, resizedImg, imaging.JPEG)
+				if err != nil {
+					log.Fatal(err)
+				}
+				resizedImageBytes = buf.Bytes()
+
+				resp, err := comatproto.RepoUploadBlob(context.TODO(), xrpcc, bytes.NewReader(resizedImageBytes))
 				if err == nil {
 					post.Embed.EmbedExternal.External.Thumb = &lexutil.LexBlob{
 						Ref:      resp.Blob.Ref,
-						MimeType: http.DetectContentType(b),
+						MimeType: http.DetectContentType(resizedImageBytes),
 						Size:     resp.Blob.Size,
 					}
 				}

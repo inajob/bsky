@@ -2,8 +2,6 @@ module github.com/inajob/bsky
 
 go 1.21
 
-toolchain go1.21.0
-
 require (
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/bluesky-social/indigo v0.0.0-20230830042519-9caaa233dc6b
@@ -13,12 +11,15 @@ require (
 	github.com/urfave/cli/v2 v2.25.7
 )
 
+require golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
+
 require (
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect
+	github.com/disintegration/imaging v1.6.2
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
