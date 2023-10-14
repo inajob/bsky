@@ -21,7 +21,9 @@ import (
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	"github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/events"
+	"github.com/bluesky-social/indigo/events/schedulers/sequential"
 	lexutil "github.com/bluesky-social/indigo/lex/util"
+	"github.com/bluesky-social/indigo/repo"
 	"github.com/bluesky-social/indigo/repomgr"
 	"github.com/bluesky-social/indigo/xrpc"
 	"github.com/fatih/color"
@@ -48,7 +50,7 @@ func doThread(cCtx *cli.Context) error {
 	}
 
 	n := cCtx.Int64("n")
-	resp, err := bsky.FeedGetPostThread(context.TODO(), xrpcc, n, arg)
+	resp, err := bsky.FeedGetPostThread(context.TODO(), xrpcc, 0, n, arg)
 	if err != nil {
 		return fmt.Errorf("cannot get post thread: %w", err)
 	}
@@ -94,7 +96,7 @@ func doTimeline(cCtx *cli.Context) error {
 			if handle == "self" {
 				handle = xrpcc.Auth.Did
 			}
-			resp, err := bsky.FeedGetAuthorFeed(context.TODO(), xrpcc, handle, cursor, n)
+			resp, err := bsky.FeedGetAuthorFeed(context.TODO(), xrpcc, handle, cursor, "", n)
 			if err != nil {
 				return fmt.Errorf("cannot get author feed: %w", err)
 			}
@@ -179,11 +181,12 @@ func doDelete(cCtx *cli.Context) error {
 }
 
 func addLink(xrpcc *xrpc.Client, post *bsky.FeedPost, link string) {
-	doc, _ := goquery.NewDocument(link)
+	doc, err := goquery.NewDocument(link)
 	var title string
 	var description string
 	var imgURL string
-	if doc != nil {
+
+	if err == nil {
 		title = doc.Find(`title`).Text()
 		description, _ = doc.Find(`meta[property="description"]`).Attr("content")
 		imgURL, _ = doc.Find(`meta[property="og:image"]`).Attr("content")
@@ -204,6 +207,12 @@ func addLink(xrpcc *xrpc.Client, post *bsky.FeedPost, link string) {
 				Description: description,
 				Title:       title,
 				Uri:         link,
+			},
+		}
+	} else {
+		post.Embed.EmbedExternal = &bsky.EmbedExternal{
+			External: &bsky.EmbedExternal_External{
+				Uri: link,
 			},
 		}
 	}
@@ -652,7 +661,8 @@ func doStream(cCtx *cli.Context) error {
 	}()
 
 	enc := json.NewEncoder(os.Stdout)
-	events.ConsumeRepoStreamLite(ctx, con, func(op repomgr.EventKind, seq int64, path string, did string, rcid *cid.Cid, rec any) error {
+
+	cb := func(op repomgr.EventKind, seq int64, path string, did string, rcid *cid.Cid, rec any) error {
 		type Rec struct {
 			Op   repomgr.EventKind `json:"op"`
 			Seq  int64             `json:"seq"`
@@ -738,7 +748,50 @@ func doStream(cCtx *cli.Context) error {
 			}
 		}
 		return nil
-	})
+	}
 
-	return nil
+	rsc := &events.RepoStreamCallbacks{
+		RepoCommit: func(evt *comatproto.SyncSubscribeRepos_Commit) error {
+			if evt.TooBig {
+				log.Printf("skipping too big events for now: %d", evt.Seq)
+				return nil
+			}
+			r, err := repo.ReadRepoFromCar(ctx, bytes.NewReader(evt.Blocks))
+			if err != nil {
+				return fmt.Errorf("reading repo from car (seq: %d, len: %d): %w", evt.Seq, len(evt.Blocks), err)
+			}
+
+			for _, op := range evt.Ops {
+				ek := repomgr.EventKind(op.Action)
+				switch ek {
+				case repomgr.EvtKindCreateRecord, repomgr.EvtKindUpdateRecord:
+					rc, rec, err := r.GetRecord(ctx, op.Path)
+					if err != nil {
+						e := fmt.Errorf("getting record %s (%s) within seq %d for %s: %w", op.Path, *op.Cid, evt.Seq, evt.Repo, err)
+						log.Print(e)
+						continue
+					}
+
+					if lexutil.LexLink(rc) != *op.Cid {
+						// TODO: do we even error here?
+						return fmt.Errorf("mismatch in record and op cid: %s != %s", rc, *op.Cid)
+					}
+
+					if err := cb(ek, evt.Seq, op.Path, evt.Repo, &rc, rec); err != nil {
+						log.Printf("event consumer callback (%s): %s", ek, err)
+						continue
+					}
+
+				case repomgr.EvtKindDeleteRecord:
+					if err := cb(ek, evt.Seq, op.Path, evt.Repo, nil, nil); err != nil {
+						log.Printf("event consumer callback (%s): %s", ek, err)
+						continue
+					}
+				}
+			}
+			return nil
+		},
+	}
+
+	return events.HandleRepoStream(ctx, con, sequential.NewScheduler("stream", rsc.EventHandler))
 }
